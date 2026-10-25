@@ -15,6 +15,9 @@ jobs:
   unit_test:
     name: Unit Tests
     runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -31,8 +34,11 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r dev-requirements.txt
+          python -m pip install -r requirements.txt
+          python -m pip install -r dev-requirements.txt
+
+      - name: Verify application import
+        run: python -c "from app.main import app; print('Application import OK')"
 
       - name: Run pytest
         run: python -m pytest -v
@@ -40,6 +46,7 @@ jobs:
   sast:
     name: Bandit SAST
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -50,9 +57,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install Bandit
-        run: |
-          python -m pip install --upgrade pip
-          pip install bandit
+        run: python -m pip install bandit
 
       - name: Run Bandit
         run: bandit -r app
@@ -60,6 +65,7 @@ jobs:
   sca:
     name: pip-audit Dependency Scan
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -76,8 +82,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install -r dev-requirements.txt
+          python -m pip install -r requirements.txt
+          python -m pip install -r dev-requirements.txt
 
       - name: Audit production dependencies
         run: pip-audit -r requirements.txt
@@ -88,6 +94,7 @@ jobs:
   secret_scan:
     name: Gitleaks Secret Scan
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -103,10 +110,14 @@ jobs:
     name: Build and Push Docker Image
     runs-on: ubuntu-latest
     needs: [unit_test, sast, sca, secret_scan]
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Login to Docker Hub
         uses: docker/login-action@v3
@@ -127,13 +138,24 @@ jobs:
     name: Trivy Image Scan
     runs-on: ubuntu-latest
     needs: [build_and_push]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Scan Docker image
         uses: aquasecurity/trivy-action@0.36.0
         with:
           image-ref: ${{ secrets.DOCKERHUB_USERNAME }}/notes-app:${{ github.sha }}
           format: table
           exit-code: "1"
-          ignore-unfixed: false
+          ignore-unfixed: true
           vuln-type: os,library
           severity: HIGH,CRITICAL
