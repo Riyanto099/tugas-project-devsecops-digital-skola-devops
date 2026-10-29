@@ -5,6 +5,7 @@ const store = require('./store');
 
 const app = express();
 app.use(bodyParser.json());
+app.disable('x-powered-by');
 
 app.get('/', (_req, res) => {
   res.json({ service: 'notes-app', health: 'ok' });
