@@ -85,9 +85,54 @@ jobs:
           test -f sonar-project.properties
           test -f coverage/lcov.info
 
+      - name: Verify SonarQube token
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        shell: bash
+        run: |
+          if [ -z "$SONAR_TOKEN" ]; then
+            echo "::error::SONAR_TOKEN belum diatur di GitHub Repository Secrets."
+            exit 1
+          fi
+
+          echo "SONAR_TOKEN tersedia."
+
+      - name: Check SonarQube Docker network
+        shell: bash
+        run: |
+          if ! docker network inspect sonarnet >/dev/null 2>&1; then
+            echo "::error::Docker network sonarnet tidak ditemukan."
+            exit 1
+          fi
+
+          echo "Docker network sonarnet tersedia."
+
+      - name: Wait for SonarQube
+        shell: bash
+        run: |
+          for i in {1..12}; do
+            STATUS=$(docker run --rm \
+              --network sonarnet \
+              curlimages/curl:latest \
+              -fsS --max-time 5 \
+              http://sonarqube:9000/api/system/status 2>/dev/null) || STATUS=""
+
+            if echo "$STATUS" | grep -q '"status":"UP"'; then
+              echo "SonarQube siap menerima analisis."
+              exit 0
+            fi
+
+            echo "SonarQube belum siap. Percobaan $i/12..."
+            sleep 5
+          done
+
+          echo "::error::SonarQube belum berstatus UP setelah menunggu."
+          exit 1
+
       - name: Analyze with SonarQube Local
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        shell: bash
         run: |
           docker run --rm \
             --network sonarnet \
